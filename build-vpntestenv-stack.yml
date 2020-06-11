@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: create vpc, ec2
+
+Parameters:
+  SystemName:
+    Description: system name
+    Type: String
+    Default: pjname
+  PhaseName:
+    Description: Phase
+    Type: String
+    Default: test
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  EC2InstanceType:
+    Description: t2.micro
+    Type: String
+    Default: t2.micro
+  EC2InstanceAMI:
+    Description: amazon linux
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  EC2VolumeType:
+    Type: String
+    Default: gp2
+  EC2VolumeSize:
+    Description: 8
+    Type: Number
+    Default: 8
+  VPCCIDR:
+    Description: VPC NW
+    Type: String
+    Default: 10.0.0.0/16
+  PUBLIC0001CIDR:
+    Description: Public NW#1
+    Type: String
+    Default: 10.0.1.0/24
+  PUBLIC0002CIDR:
+    Description: Public NW#2
+    Type: String
+    Default: 10.0.2.0/24
+  SSHKEYNAME:
+    Description: SSHKEY
+    Type: String
+    Default: sshkey-sample
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-vpc
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-igw
+  InternetGatewayAttachment: 
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC 
+  PublicSubnet0001:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PUBLIC0001CIDR
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-subnet0001
+      VpcId: !Ref VPC
+  PublicSubnet0002:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !Ref PUBLIC0002CIDR
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-subnet0002
+      VpcId: !Ref VPC
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-public-rtb
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+  PubSubnet0001RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0001
+      RouteTableId: !Ref PublicRouteTable
+  PubSubnet0002RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0002
+      RouteTableId: !Ref PublicRouteTable
+  EC2SecurityGroupICMP:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow ICMP via same VPC
+      SecurityGroupIngress:
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-SG-icmp
+  EC2SecurityGroupSSH:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: allow SSH via static IP
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-SG-ssh
+  EC2Instance0001:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref EC2InstanceType
+      ImageId: !Ref EC2InstanceAMI
+      SubnetId: !Ref PublicSubnet0001
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: !Ref EC2VolumeType
+            VolumeSize: !Ref EC2VolumeSize
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-${PhaseName}-${EC2InstanceType}-01
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroupICMP
+        - !Ref EC2SecurityGroupSSH
+      KeyName: !Ref SSHKEYNAME
